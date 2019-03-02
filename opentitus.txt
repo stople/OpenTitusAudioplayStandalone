@@ -1,0 +1,16 @@
+OpenTitus is an open source environment to play Titus the fox, with better modification possibilities.
+
+OpenTitus isn't finished yet, there are much work left on it, but be patient.....
+
+OpenTitus will make use of a new file format, MFL, which is based of different modules, and a combination of these.
+
+A quick estimate of the current state of the project, Oct 1st, 2010
+Initial plan - 100 %
+Make the specs for the MFL file format - 80 %
+Make a data structure that fits MFL - 80 %
+Make a MFL file parser - 0 %
+Make MFL internal working code - 10 %
+Analyze and import the game engine - 5 %
+Audio player - 80 % (misses a better emulator, sound effects and speaker audio)
+
+The OpenTitus team
