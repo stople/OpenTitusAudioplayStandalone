@@ -53,7 +53,7 @@ unsigned int lastnote, tick; //debug
 
 uint16_t MUS_OFFSET, INS_OFFSET, SFX_OFFSET, BUZ_OFFSET;
 uint8_t SONG_COUNT, SFX_COUNT;
-uint8_t AUDIOVERSION, AUDIOTYPE;
+uint8_t AUDIOVERSION, AUDIOTYPE; //AUDIOTYPE: 1=TTF/MOK, 2=Blues Brothers
 uint8_t FX_ON;
 uint16_t FX_TIME;
 uint8_t AUDIOTIMING;
@@ -473,26 +473,51 @@ int load_file(char *filename, unsigned char **raw_data)
         fclose(ifp);
         return -5;
     }
-    if (AUDIOTYPE != 1) {
+    if ((AUDIOTYPE != 1) && (AUDIOTYPE != 2)) {
         fprintf(stderr, "Unsupported type of audio in file %s!\n", filename);
         fclose(ifp);
         return -5;
     }
 
-    if ((i = fread(buffer, 1, 17, ifp)) != 17) {
-        fprintf(stderr, "Reading error: read %d bytes, should have been %d, in file %s!\n", i, size, filename);
-        fclose(ifp);
-        return -5;
+    if (AUDIOTYPE == 1) { //TTF/MOK
+
+        if ((i = fread(buffer, 1, 17, ifp)) != 17) {
+            fprintf(stderr, "Reading error: read %d bytes, should have been %d, in file %s!\n", i, size, filename);
+            fclose(ifp);
+            return -5;
+        }
+
+        data_offset = loaduint16(buffer[1], buffer[0]);
+        data_size = loaduint16(buffer[3], buffer[2]);
+        pointer_diff = loadint16(buffer[6], buffer[5]);
+        MUS_OFFSET = loaduint16(buffer[8], buffer[7]);
+        INS_OFFSET = loaduint16(buffer[10], buffer[9]);
+        SFX_OFFSET = loaduint16(buffer[12], buffer[11]);
+        BUZ_OFFSET = loaduint16(buffer[14], buffer[13]);
+        SONG_COUNT = buffer[15];
+        SFX_COUNT = buffer[16];
+
+    } else if (AUDIOTYPE == 2) { //BB
+        
+        if ((i = fread(buffer, 1, 15, ifp)) != 15) {
+            fprintf(stderr, "Reading error: read %d bytes, should have been %d, in file %s!\n", i, size, filename);
+            fclose(ifp);
+            return -5;
+        }
+
+        data_offset = loaduint16(buffer[1], buffer[0]);
+        data_size = loaduint16(buffer[3], buffer[2]);
+        pointer_diff = loadint16(buffer[6], buffer[5]);
+        MUS_OFFSET = loaduint16(buffer[8], buffer[7]);
+        SFX_OFFSET = loaduint16(buffer[10], buffer[9]);
+        BUZ_OFFSET = loaduint16(buffer[12], buffer[11]);
+        SONG_COUNT = buffer[13];
+        SFX_COUNT = buffer[14];
+
     }
-    data_offset = loaduint16(buffer[1], buffer[0]);
-    data_size = loaduint16(buffer[3], buffer[2]);
-    pointer_diff = loadint16(buffer[6], buffer[5]);
-    MUS_OFFSET = loaduint16(buffer[8], buffer[7]);
-    INS_OFFSET = loaduint16(buffer[10], buffer[9]);
-    SFX_OFFSET = loaduint16(buffer[12], buffer[11]);
-    BUZ_OFFSET = loaduint16(buffer[14], buffer[13]);
-    SONG_COUNT = buffer[15];
-    SFX_COUNT = buffer[16];
+    if (SFX_COUNT > ADLIB_SFX_COUNT) {
+        SFX_COUNT = ADLIB_SFX_COUNT;
+    }
 
     *raw_data = (unsigned char *)malloc(data_size);
     if (&raw_data == NULL) {
@@ -527,14 +552,25 @@ int load_data(ADLIB_DATA *aad, unsigned char *raw_data, int song_number)
     //Load instruments
     j = INS_OFFSET;
 
-    for (i = 0; i < song_number; i++) {
-        do {
-            j += 2;
-            tmp1 = ((unsigned int)raw_data[j] & 0xFF) + (((unsigned int)raw_data[j + 1] << 8) & 0xFF00);
-        } while (tmp1 != 0xFFFF);
-        j += 2;
-    }
     all_vox_zero();
+    
+    //Load instruments
+    if (AUDIOTYPE == 1) { //TTF/MOK
+        j = INS_OFFSET;
+        for (i = 0; i < song_number; i++) {
+            do {
+                j += 2;
+                tmp1 = ((unsigned int)raw_data[j] & 0xFF) + (((unsigned int)raw_data[j + 1] << 8) & 0xFF00);
+            } while (tmp1 != 0xFFFF);
+            j += 2;
+        }
+    } else if (AUDIOTYPE == 2) { //BB
+        j = MUS_OFFSET + song_number * 8 + 2 + pointer_diff;
+        tmp1 = ((unsigned int)raw_data[j] & 0xFF) + (((unsigned int)raw_data[j + 1] << 8) & 0xFF00);
+        j = tmp1 + pointer_diff;
+    }
+
+    
     tmp2 = ((unsigned int)raw_data[j] & 0xFF) + (((unsigned int)raw_data[j + 1] << 8) & 0xFF00);
 
     for (i = 0; i < ADLIB_INSTRUMENT_COUNT + 1; i++)
@@ -567,18 +603,31 @@ int load_data(ADLIB_DATA *aad, unsigned char *raw_data, int song_number)
     }
 
     //Set skip delay
-    aad->skip_delay = tmp1;
-    aad->skip_delay_counter = tmp1;
+    if (AUDIOTYPE == 1) { //TTF/MOK
+        aad->skip_delay = tmp1;
+        aad->skip_delay_counter = tmp1;
+    } else if (AUDIOTYPE == 2) { //BB
+        j = MUS_OFFSET + song_number * 8 + 4 + pointer_diff;
+        tmp1 = ((unsigned int)raw_data[j] & 0xFF) + (((unsigned int)raw_data[j + 1] << 8) & 0xFF00);
+        aad->skip_delay = tmp1;
+        aad->skip_delay_counter = tmp1;
+    }
 
     //Load music
     j = MUS_OFFSET;
 
-    for (i = 0; i < song_number; i++) {
-        do {
+    if (AUDIOTYPE == 1) { //TTF/MOK
+        for (i = 0; i < song_number; i++) {
+            do {
+                j += 2;
+                tmp1 = ((unsigned int)raw_data[j] & 0xFF) + (((unsigned int)raw_data[j + 1] << 8) & 0xFF00);
+            } while (tmp1 != 0xFFFF);
             j += 2;
-            tmp1 = ((unsigned int)raw_data[j] & 0xFF) + (((unsigned int)raw_data[j + 1] << 8) & 0xFF00);
-        } while (tmp1 != 0xFFFF);
-        j += 2;
+        }
+    } else if (AUDIOTYPE == 2) { //BB
+        j = MUS_OFFSET + song_number * 8 + pointer_diff;
+        tmp1 = ((unsigned int)raw_data[j] & 0xFF) + (((unsigned int)raw_data[j + 1] << 8) & 0xFF00);
+        j = tmp1 + pointer_diff;
     }
 
     aad->cutsong = -1;
