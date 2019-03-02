@@ -1,5 +1,5 @@
 Compiling instructions for Audioplay standalone edition
-Version 1.0
+Version 1.1
 
 Audioplay standalone edition is released under the Gnu GPL version 3 or (at your option) any later version of the license, and it is released "as is"; without any warranty.
 
@@ -15,4 +15,12 @@ make
 
 Clean:
 make clean
+
+
+Win32 compilation:
+Use MinGW with MSYS
+Compile SDL, use ./configure --disable-stdio-redirect
+copy /build/SDL_win32_main.o to audioplay directory
+compile by using make with Makefile_w32
+
 

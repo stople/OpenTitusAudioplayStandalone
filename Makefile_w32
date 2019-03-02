@@ -1,0 +1,18 @@
+CC=gcc
+
+AUDIOPLAY_TARG := audioplay.exe
+AUDIOPLAY_OBJS := \
+	fmopl.o \
+	sqz.o \
+	audioplay.o \
+	SDL_win32_main.o
+
+DIRS = .
+
+all : $(AUDIOPLAY_TARG)
+
+$(AUDIOPLAY_TARG) : $(AUDIOPLAY_OBJS)
+	$(CC) $(CFLAGS) -o $(AUDIOPLAY_TARG) $(AUDIOPLAY_OBJS) `sdl-config --cflags` -L/usr/local/lib -lmingw32 -lSDL -lm -luser32 -lgdi32 -lwinmm -ldxguid -ldinput8 -DNO_STDIO_REDIRECT
+
+clean :
+	rm -f $(foreach dir,$(DIRS),$(foreach suffix,/*.o, $(addsuffix $(suffix),$(dir))))

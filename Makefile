@@ -9,7 +9,7 @@ DIRS = .
 all : $(AUDIOPLAY_TARG)
 
 $(AUDIOPLAY_TARG) : $(AUDIOPLAY_OBJS)
-	$(CC) $(CFLAGS) -o $(AUDIOPLAY_TARG) $(AUDIOPLAY_OBJS) `sdl-config --cflags --libs` -lm -lbinio
+	$(CC) $(CFLAGS) -o $(AUDIOPLAY_TARG) $(AUDIOPLAY_OBJS) `sdl-config --cflags --libs` -lm
 
 $(OPLTEST_TARG) : $(OPLTEST_OBJS)
 	$(CC) $(CFLAGS) -o $(OPLTEST_TARG) $(OPLTEST_OBJS) -lm -lbinio
