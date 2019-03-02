@@ -23,12 +23,10 @@
 
 #define ADLIB_DATA_COUNT 10
 #define ADLIB_INSTRUMENT_COUNT 19
+#define ADLIB_SFX_COUNT 14
 
 #define FREQ_RATE 44100
 #define BUF_SIZE 2048
-
-#define MUS_OFFSET 28677
-#define INS_OFFSET 29029
 
 char playing;
 int rate;
@@ -53,7 +51,16 @@ int debug_counter;
 
 unsigned int lastnote, tick; //debug
 
-int segment = 0x6AF0;
+uint16_t MUS_OFFSET, INS_OFFSET, SFX_OFFSET, BUZ_OFFSET;
+uint8_t SONG_COUNT, SFX_COUNT;
+uint8_t AUDIOVERSION, AUDIOTYPE;
+uint8_t FX_ON;
+uint16_t FX_TIME;
+uint8_t AUDIOTIMING;
+int lastaudiotick;
+uint8_t audiodelay;
+int16_t pointer_diff;
+
 
 typedef struct {
     unsigned char op[2][5]; //Two operators and five data settings 
@@ -110,11 +117,18 @@ void updatechip(int reg, int val);
 int fillchip(ADLIB_DATA *aad);
 void insmaker(unsigned char *insdata, int channel);
 int load_file(char *filename, unsigned char **raw_data);
-int load_data(ADLIB_DATA *aad, unsigned char *raw_data, int len, int mus_offset, int ins_offset, int song_number);
 void all_vox_zero();
 void callback(void *userdata, Uint8 *audiobuf, int len);
 //int main(int argc, char *argv[]);
 
+unsigned int loaduint16(unsigned char c1, unsigned char c2){
+    return (((unsigned int)c1 * 256) & 0xFF00) + (unsigned int)c2;
+}
+
+int loadint16(unsigned char c1, unsigned char c2){
+    short int tmpint = ((short int)c1 << 8) + (short int)c2;
+    return (int)tmpint;
+}
 
 
 int play(){
@@ -290,7 +304,7 @@ int fillchip(ADLIB_DATA *aad)
                     aad->return_point[i] = aad->pointer[i] + 2;
                     tmp1 = ((unsigned int)aad->pointer[i][1] << 8) & 0xFF00;
                     tmp1 += (unsigned int)aad->pointer[i][0] & 0xFF;
-                    aad->pointer[i] = aad->data + segment + tmp1;
+                    aad->pointer[i] = aad->data + tmp1 + pointer_diff;
                     break;
 
                 case 1: //Update loop counter
@@ -303,7 +317,7 @@ int fillchip(ADLIB_DATA *aad)
                         aad->loop_counter[i]--;
                         tmp1 = ((unsigned int)aad->pointer[i][1] << 8) & 0xFF00;
                         tmp1 += (unsigned int)aad->pointer[i][0] & 0xFF;
-                        aad->pointer[i] = aad->data + segment + tmp1;
+                        aad->pointer[i] = aad->data + tmp1 + pointer_diff;
                     } else {
                         aad->pointer[i] += 2;
                     }
@@ -316,7 +330,7 @@ int fillchip(ADLIB_DATA *aad)
                 case 4: //Jump
                     tmp1 = ((unsigned int)aad->pointer[i][1] << 8) & 0xFF00;
                     tmp1 += (unsigned int)aad->pointer[i][0] & 0xFF;
-                    aad->pointer[i] = aad->data + segment + tmp1;
+                    aad->pointer[i] = aad->data + tmp1 + pointer_diff;
                     break;
 
                 case 15: //Finish
@@ -396,7 +410,7 @@ int fillchip(ADLIB_DATA *aad)
     return (aad->cutsong);
 }
 
-void gen_dro(ADLIB_DATA *aad, int mus_offset, int ins_offset, int song_number, int size){
+/*void gen_dro(ADLIB_DATA *aad, int mus_offset, int ins_offset, int song_number, int size){
     unsigned int i, j;
     unsigned char file[20];
     printf("Loading track %d...\n", song_number);
@@ -416,6 +430,7 @@ void gen_dro(ADLIB_DATA *aad, int mus_offset, int ins_offset, int song_number, i
     fclose(gifp);
     printf("done\n");
 }
+*/
 
 void insmaker(unsigned char *insdata, int channel)
 {
@@ -432,7 +447,8 @@ int load_file(char *filename, unsigned char **raw_data)
     int size = 0, i;
 
     FILE *ifp;
-
+    uint8_t buffer[100];
+    uint16_t data_offset, data_size;
     ifp = fopen(filename, "rb");
 
     if (ifp == NULL) {
@@ -440,28 +456,65 @@ int load_file(char *filename, unsigned char **raw_data)
         return(-1);
     }
 
-    fseek(ifp, 0L, SEEK_END);
-    size = ftell(ifp);
-    fseek(ifp, 0, SEEK_SET);
-    *raw_data = (unsigned char *)malloc(size + 1);
+    
+    if ((i = fread(buffer, 1, 18, ifp)) != 18) {
+        fprintf(stderr, "Reading error: read %d bytes, should have been %d, in file %s!\n", i, size, filename);
+        fclose(ifp);
+        return -5;
+    }
+    if (strncmp (buffer, "OPENTITUSAUDIO", 14) != 0) {
+        fprintf(stderr, "Invalid audio file format in file %s!\n", filename);
+        fclose(ifp);
+        return -5;
+    }
+    sscanf (buffer + 14, "%c%c", &AUDIOVERSION, &AUDIOTYPE);
+    if (AUDIOVERSION != 1) {
+        fprintf(stderr, "Unsupported version of audiofile %s!\n", filename);
+        fclose(ifp);
+        return -5;
+    }
+    if (AUDIOTYPE != 1) {
+        fprintf(stderr, "Unsupported type of audio in file %s!\n", filename);
+        fclose(ifp);
+        return -5;
+    }
+
+    if ((i = fread(buffer, 1, 17, ifp)) != 17) {
+        fprintf(stderr, "Reading error: read %d bytes, should have been %d, in file %s!\n", i, size, filename);
+        fclose(ifp);
+        return -5;
+    }
+    data_offset = loaduint16(buffer[1], buffer[0]);
+    data_size = loaduint16(buffer[3], buffer[2]);
+    pointer_diff = loadint16(buffer[6], buffer[5]);
+    MUS_OFFSET = loaduint16(buffer[8], buffer[7]);
+    INS_OFFSET = loaduint16(buffer[10], buffer[9]);
+    SFX_OFFSET = loaduint16(buffer[12], buffer[11]);
+    BUZ_OFFSET = loaduint16(buffer[14], buffer[13]);
+    SONG_COUNT = buffer[15];
+    SFX_COUNT = buffer[16];
+
+    *raw_data = (unsigned char *)malloc(data_size);
     if (&raw_data == NULL) {
         fprintf(stderr, "Not enough memory to load file: %s!\n", filename);
         fclose(ifp);
         return -4;
     }
 
-    if ((i = fread(*raw_data, 1, size, ifp)) != size) {
+    fseek(ifp, data_offset, SEEK_SET);
+
+    if ((i = fread(*raw_data, 1, data_size, ifp)) != data_size) {
         fprintf(stderr, "Reading error: read %d bytes, should have been %d, in file %s!\n", i, size, filename);
         free (*raw_data);
         fclose(ifp);
         return -5;
     }
     fclose(ifp);
-    return size;
+    return data_size;
 }
 
 
-int load_data(ADLIB_DATA *aad, unsigned char *raw_data, int len, int mus_offset, int ins_offset, int song_number)
+int load_data(ADLIB_DATA *aad, unsigned char *raw_data, int song_number)
 {
     int i; //Index
     int j; //Offset to the current offset
@@ -472,7 +525,7 @@ int load_data(ADLIB_DATA *aad, unsigned char *raw_data, int len, int mus_offset,
     aad->perc_stat = 0x20;
 
     //Load instruments
-    j = ins_offset;
+    j = INS_OFFSET;
 
     for (i = 0; i < song_number; i++) {
         do {
@@ -487,7 +540,7 @@ int load_data(ADLIB_DATA *aad, unsigned char *raw_data, int len, int mus_offset,
     for (i = 0; i < ADLIB_INSTRUMENT_COUNT + 1; i++)
         aad->instrument_data[i].vox = 0xFF; //Init; instrument not in use
 
-    for (i = 0; (i < ADLIB_INSTRUMENT_COUNT + 1) && ((j + 2) < len); i++) {
+    for (i = 0; (i < ADLIB_INSTRUMENT_COUNT + 1) && ((j + 2) < aad->data_size); i++) {
         tmp1 = tmp2;
         tmp2 = ((unsigned int)raw_data[j + 2] & 0xFF) + (((unsigned int)raw_data[j + 3] << 8) & 0xFF00);
         j += 2;
@@ -499,17 +552,17 @@ int load_data(ADLIB_DATA *aad, unsigned char *raw_data, int len, int mus_offset,
             continue;
 
         if (i > 14) //Perc instrument (15-18) have an extra byte, melodic (0-14) have not
-            aad->instrument_data[i].vox = raw_data[(tmp1++) + segment];
+            aad->instrument_data[i].vox = raw_data[(tmp1++) + pointer_diff];
         else
             aad->instrument_data[i].vox = 0xFE;
 
         for (k = 0; k < 5; k++)
-            aad->instrument_data[i].op[0][k] = raw_data[(tmp1++) + segment];
+            aad->instrument_data[i].op[0][k] = raw_data[(tmp1++) + pointer_diff];
 
         for (k = 0; k < 5; k++)
-            aad->instrument_data[i].op[1][k] = raw_data[(tmp1++) + segment];
+            aad->instrument_data[i].op[1][k] = raw_data[(tmp1++) + pointer_diff];
 
-        aad->instrument_data[i].fb_alg = raw_data[tmp1 + segment];
+        aad->instrument_data[i].fb_alg = raw_data[tmp1 + pointer_diff];
 
     }
 
@@ -518,7 +571,7 @@ int load_data(ADLIB_DATA *aad, unsigned char *raw_data, int len, int mus_offset,
     aad->skip_delay_counter = tmp1;
 
     //Load music
-    j = mus_offset;
+    j = MUS_OFFSET;
 
     for (i = 0; i < song_number; i++) {
         do {
@@ -529,7 +582,7 @@ int load_data(ADLIB_DATA *aad, unsigned char *raw_data, int len, int mus_offset,
     }
 
     aad->cutsong = -1;
-    for (i = 0; (i < ADLIB_DATA_COUNT + 1) && (j < len); i++) {
+    for (i = 0; (i < ADLIB_DATA_COUNT + 1) && (j < aad->data_size); i++) {
         tmp1 = ((unsigned int)raw_data[j] & 0xFF) + (((unsigned int)raw_data[j + 1] << 8) & 0xFF00);
         aad->cutsong++;
         if (tmp1 == 0xFFFF) //Terminate for loop
@@ -548,7 +601,7 @@ int load_data(ADLIB_DATA *aad, unsigned char *raw_data, int len, int mus_offset,
         aad->octave[i] = 0;
         aad->return_point[i] = NULL;
         aad->loop_counter[i] = 0;
-        aad->pointer[i] = aad->data + segment + tmp1;
+        aad->pointer[i] = aad->data + tmp1 + pointer_diff;
         aad->lie_late[i] = 0;
         j += 2;
     }
@@ -624,10 +677,9 @@ int main(int argc, char *argv[]){
     FILE *ifp, *ofp;
     int song, size;
 
-    printf("\nTITUS standalone audio player v1.0\n\n");
-    printf("A working music player, which converts music stored in the executable into a OPL2 stream.\n");
-    printf("Usage: Put audioplay in your titus folder. Audioplay will look for FOX.EXE, if the file doesn't exist it will SQZ extract it from FOX.COM.\n\n");
-    printf("Usage: audioplay song_number output output_size\n\n");
+    printf("\nTITUS standalone audio player v2.0\n\n");
+    printf("A working music player, which converts music stored in an extracted OPENTITUSAUDIO file into a OPL2 stream.\n");
+    printf("Usage: audioplay file song_number output output_size\n\n");
     printf("Song number is 0 to 15.\n");
     printf("Output: Optional, DIRECT (default) or DRO for making outputX.dro.\n");
     printf("Output size: size of DRO file, default 4000.\n");
@@ -642,18 +694,22 @@ int main(int argc, char *argv[]){
 
     for (i = 0; i < argc; i++) {
         switch (i) {
-        case 1:
-            song = atoi(argv[1]);
+        case 1: //source file (argv[1])
+
+            break;
+
+        case 2: //song number
+            song = atoi(argv[2]);
             if ((song < 0) || (song > 15)) {
                 printf("Invalid song number\n");
                 return -1;
             }
             break;
 
-        case 2:
-            if (strcmp(argv[2], "DRO") == 0) {
+        case 3: //output type
+            if (strcmp(argv[3], "DRO") == 0) {
                 output_format = DRO;
-            } else if ((strcmp(argv[2], "DIRECT") == 0) || (strcmp(argv[2], "") == 0)) {
+            } else if ((strcmp(argv[3], "DIRECT") == 0) || (strcmp(argv[3], "") == 0)) {
                 output_format = DIRECT;
             } else {
                 printf("Invalid output\n");
@@ -661,136 +717,31 @@ int main(int argc, char *argv[]){
             }
             break;
 
-        case 3:
-            size = atoi(argv[3]);
+        case 4: //output size
+            size = atoi(argv[4]);
             if (song == 0)
                 size = 4000;
             break;
         }
     }
 //return (0);
-    printf("Looking for FOX.EXE... ");
-    fflush(stdout);
-    ifp = fopen("FOX.EXE", "rb");
-    if (ifp == NULL) {
-        printf("not found\n");
-        printf("Looking for FOX.COM... ");
-        fflush(stdout);
-        ifp = fopen("FOX.COM", "rb");
-        if (ifp == NULL) {
-            printf("not found\n\n");
-            printf("FOX.COM not found, have you placed the executable in the correct folder?\n");
-            printf("(Keep in mind that some file systems are case sensitive, try to rename fox.com to FOX.COM)\n");
-            return (-1);
-        }
-        printf("found\n");
 
-
-        fputs("\nDo you want to SQZ-extract FOX.EXE from the source file FOX.COM (Y/N)? ", stdout);
-        fflush(stdout);
-
-        if (fgets(buffer, sizeof buffer, stdin) != NULL) {
-            newline = strchr(buffer, '\n'); // search for newline character
-            if (newline != NULL) {
-                *newline = '\0'; // overwrite trailing newline
-            }
-        }
-
-        printf("\n");
-
-        if (buffer[1] == 0) {
-            switch (buffer[0]) {
-            case 'Y': case 'y':
-                break;
-            case 'N': case 'n':
-                printf("Audioplay requires FOX.EXE in order to work.\n\n");
-                return (-1);
-                break;
-            default:
-                printf("Invalid selection (%s), selecting NO.\n", buffer);
-                printf("Audioplay requires FOX.EXE in order to work.\n\n");
-                return (-1);
-            }
-        } else {
-            printf("Invalid selection (%s), selecting NO.\n\n", buffer);
-            printf("Audioplay requires FOX.EXE in order to work.\n\n");
-            return (-1);
-        }
-
-        fseek(ifp, 0L, SEEK_END);
-        in_len = ftell(ifp) - 790;
-        //FOX.COM contains a SQZ-compressed executable, at offset 790, in addition to SQZ-extracting code
-        if (in_len + 790 != 44389) {
-            printf("You have an incompatible version of FOX.COM.");
-            fclose (ifp);
-            return (-1);
-        }
-        fseek(ifp, 790, SEEK_SET);
-        inbuffer = (unsigned char *)malloc(sizeof(unsigned char)*in_len);
-        if (inbuffer == NULL) {
-            fprintf(stderr, "Error: Not enough memory (input buffer) to decompress FOX.COM, needs %lu bytes!\n", sizeof(unsigned char) * in_len);
-            fclose (ifp);
-            return (-1);
-        }
-
-        if ((i = fread(inbuffer, 1, in_len, ifp)) != in_len) {
-            fprintf(stderr, "Error: Invalid filesize: %d bytes, should have been %d bytes, in file %s!\n", i + 790, in_len + 790, "FOX.COM");
-            free (inbuffer);
-            fclose (ifp);
-            return (-1);
-        }
-
-        fclose (ifp);
-
-        retval = unSQZ(inbuffer, in_len, &output);
-
-        if ((retval > 0) && (output != NULL)) {
-            ofp = fopen("FOX.EXE", "wb");
-            if (ofp == NULL) {
-                fprintf(stderr, "Can't open output file!\n");
-                free (inbuffer);
-                free (output);
-                return(-1);
-            }
-            fwrite(output, 1, retval, ofp);
-            fclose (ofp);
-        } else {
-            fprintf(stderr, "Extracted content is invalid!\n");
-            free (inbuffer);
-            free (output);
-            return(-1);
-        }
-        free (output);
-        free (inbuffer);
-
-        if (retval != 63985) {
-            printf("FOX.COM extracted successfully, but the extracted executable is incompatible.");
-            return (-1);
-        }
-    } else {
-        printf("found\n");
-        fseek(ifp, 0L, SEEK_END);
-        in_len = ftell(ifp);
-        if (in_len != 63985) {
-            printf("You have an incompatible version of FOX.EXE, try to rename/delete it and restart audioplay.");
-            fclose (ifp);
-            return (-1);
-        }
-        fclose (ifp);
-    }
 
     init();
 
-    sdl_player_data.aad.data_size = load_file("FOX.EXE", &(sdl_player_data.aad.data));
+    sdl_player_data.aad.data_size = load_file(argv[1], &(sdl_player_data.aad.data));
     if (sdl_player_data.aad.data_size < 0) {
         clean();
         return 0;
     }
+    
+    //initializeOpenTitusAudioFile(sdl_player_data.aad.data);
+    
     if (output_format == DRO) {
-        gen_dro(&(sdl_player_data.aad), MUS_OFFSET, INS_OFFSET, song, size);
+        //gen_dro(&(sdl_player_data.aad), MUS_OFFSET, INS_OFFSET, song, size);
     } else {
         printf("Loading track %d...\n", song);
-        load_data(&(sdl_player_data.aad), sdl_player_data.aad.data, sdl_player_data.aad.data_size, MUS_OFFSET, INS_OFFSET, song);
+        load_data(&(sdl_player_data.aad), sdl_player_data.aad.data, song);
         play();
     }
 
