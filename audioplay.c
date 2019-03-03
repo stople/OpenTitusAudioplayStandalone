@@ -39,6 +39,7 @@ unsigned char opera[] = {0,0,1,2,3,4,5,8,9,0xA,0xB,0xC,0xD,0x10,0x11,0x12,0x13,0
 unsigned char voxp[] = {1,2,3,7,8,9,13,17,15,18,14};
 unsigned int gamme[] = {343,363,385,408,432,458,485,514,544,577,611,647,0};
 unsigned int bgamme[] = {36485,34437,32505,30680,28959,27333,25799,24351,22984,21694,20477,19327,10};
+unsigned char btempo[] = {4,6,6,10,8,3,0,0,6,0,10,2,3,3,0,0};
 
 FM_OPL *opl;
 
@@ -246,7 +247,7 @@ int fillchip(ADLIB_DATA *aad)
         if (aad->delay_counter[i] > 1) {
             if (aad->delay_counter[i] == 2 && output_format == BUZZER && aad->lie[i] != 1)
             {
-                buzzerFreq = 0;
+                setBuzzerFreqFromDivider(15000);
             }
             
             aad->delay_counter[i]--;
@@ -705,87 +706,17 @@ int load_data_buzzer(ADLIB_DATA *aad, unsigned char *raw_data, int song_number)
     unsigned int tmp1; //Source offset
     unsigned int tmp2; //Next offset
 
-    //aad->perc_stat = 0x20;
-
-    /*
-    //Load audio
-    j = BUZ_OFFSET;
-
-    //all_vox_zero();
-    
-    //Load instruments
-    if (AUDIOTYPE == 1) { //TTF/MOK
-        j = BUZ_OFFSET;
-        for (i = 0; i < song_number; i++) {
-            do {
-                j += 2;
-                tmp1 = ((unsigned int)raw_data[j] & 0xFF) + (((unsigned int)raw_data[j + 1] << 8) & 0xFF00);
-            } while (tmp1 != 0xFFFF);
-            j += 2;
-        }
-    }
-
-    //pointer to song data
-    tmp2 = ((unsigned int)raw_data[j] & 0xFF) + (((unsigned int)raw_data[j + 1] << 8) & 0xFF00);
-
-    for (i = 0; i < ADLIB_INSTRUMENT_COUNT + 1; i++)
-        aad->instrument_data[i].vox = 0xFF; //Init; instrument not in use
-
-    for (i = 0; (i < ADLIB_INSTRUMENT_COUNT + 1) && ((j + 2) < aad->data_size); i++) {
-        tmp1 = tmp2;
-        tmp2 = ((unsigned int)raw_data[j + 2] & 0xFF) + (((unsigned int)raw_data[j + 3] << 8) & 0xFF00);
-        j += 2;
-
-        if (tmp2 == 0xFFFF) //Terminate for loop
-            break;
-
-        if (tmp1 == 0) //Instrument not in use
-            continue;
-
-        if (i > 14) //Perc instrument (15-18) have an extra byte, melodic (0-14) have not
-            aad->instrument_data[i].vox = raw_data[(tmp1++) + pointer_diff];
-        else
-            aad->instrument_data[i].vox = 0xFE;
-
-        for (k = 0; k < 5; k++)
-            aad->instrument_data[i].op[0][k] = raw_data[(tmp1++) + pointer_diff];
-
-        for (k = 0; k < 5; k++)
-            aad->instrument_data[i].op[1][k] = raw_data[(tmp1++) + pointer_diff];
-
-        aad->instrument_data[i].fb_alg = raw_data[tmp1 + pointer_diff];
-
-    }
-
     //Set skip delay
     if (AUDIOTYPE == 1) { //TTF/MOK
-        aad->skip_delay = tmp1;
-        aad->skip_delay_counter = tmp1;
+        aad->skip_delay = btempo[song_number];
+        aad->skip_delay_counter = btempo[song_number];
     } else if (AUDIOTYPE == 2) { //BB
-        j = MUS_OFFSET + song_number * 8 + 4 + pointer_diff;
-        tmp1 = ((unsigned int)raw_data[j] & 0xFF) + (((unsigned int)raw_data[j + 1] << 8) & 0xFF00);
-        aad->skip_delay = tmp1;
-        aad->skip_delay_counter = tmp1;
+        aad->skip_delay = 0;
+        aad->skip_delay_counter = 0;
     }
-*/
-    //Load music
-    //j = BUZ_OFFSET;
 
+    //Load music
     j = BUZ_OFFSET + song_number * 2;
-    /*if (AUDIOTYPE == 1) { //TTF/MOK
-        j = BUZ_OFFSET + song_number * 2;
-        for (i = 0; i < song_number; i++) {
-            //do {
-            //    j += 2;
-            //    tmp1 = ((unsigned int)raw_data[j] & 0xFF) + (((unsigned int)raw_data[j + 1] << 8) & 0xFF00);
-            //} while (tmp1 != 0xFFFF);
-            j += 2;
-        }
-    } else if (AUDIOTYPE == 2) { //BB
-        j = BUZ_OFFSET + song_number * 8;
-        tmp1 = ((unsigned int)raw_data[j] & 0xFF) + (((unsigned int)raw_data[j + 1] << 8) & 0xFF00);
-        j = tmp1 + pointer_diff;
-    }*/
 
     aad->cutsong = -1;
     for (i = 0; i < 1 && (j < aad->data_size); i++) {
@@ -843,6 +774,11 @@ void all_vox_zero()
     updatechip(0x55, 0x3F);
 }
 
+double squaresine(double val)
+{
+    if (sin(val) > 0) return 1;
+    else return -1;
+}
 
 void callback(void *userdata, Uint8 *audiobuf, int len)
 {
@@ -875,8 +811,11 @@ void callback(void *userdata, Uint8 *audiobuf, int len)
         for(int j = 0; j < i; j++, sdlp->sample_nr++)
         {
             double time = (double)sdlp->sample_nr / (double)FREQ_RATE;
-            //buffer[i] = (Sint16)(AMPLITUDE * sin(2.0f * M_PI * buzzerFreq * time)); // render 441 HZ sine wave
-            *p++ = (Sint16)(AMPLITUDE * sin(2.0f * M_PI * buzzerFreq * time)); // render 441 HZ sine wave
+            if (buzzerFreq == 0) *p++ = (Sint16)0;
+            else
+            {
+                *p++ = (Sint16)(AMPLITUDE * squaresine(2.0f * M_PI * buzzerFreq * time)); // render 441 HZ sine wave
+            }
         }
         
     } else {
