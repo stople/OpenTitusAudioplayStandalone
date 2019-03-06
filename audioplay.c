@@ -711,12 +711,18 @@ int load_data_buzzer(ADLIB_DATA *aad, unsigned char *raw_data, int song_number)
         aad->skip_delay = btempo[song_number];
         aad->skip_delay_counter = btempo[song_number];
     } else if (AUDIOTYPE == 2) { //BB
-        aad->skip_delay = 0;
-        aad->skip_delay_counter = 0;
+        j = BUZ_OFFSET + song_number * 4 + 2 + pointer_diff;
+        tmp1 = ((unsigned int)raw_data[j] & 0xFF) + (((unsigned int)raw_data[j + 1] << 8) & 0xFF00);
+        aad->skip_delay = tmp1;
+        aad->skip_delay_counter = tmp1;
     }
 
     //Load music
-    j = BUZ_OFFSET + song_number * 2;
+    if (AUDIOTYPE == 1) { //TTF/MOK
+        j = BUZ_OFFSET + song_number * 2;
+    } else if (AUDIOTYPE == 2) { //BB
+        j = BUZ_OFFSET + song_number * 4 + pointer_diff;
+    }
 
     aad->cutsong = -1;
     for (i = 0; i < 1 && (j < aad->data_size); i++) {
