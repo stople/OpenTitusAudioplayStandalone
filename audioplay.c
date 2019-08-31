@@ -301,9 +301,13 @@ int fillchip(ADLIB_DATA *aad)
             if (aad->lie[i]) debugPrint("LIE lie:%i ", aad->lie[i]);
             if (aad->delay_counter[i] == 2 && output_format == BUZZER && aad->lie[i] != 1)
             {
-                //Make a "switch off"-sound
-                //setBuzzerFreqFromDivider(15000); //TTF
-                buzzerFreq = 0; //BB
+                //Make a "switch off"-sound, noticeable between notes on same frequency
+                if (AUDIOTYPE == 1) { //TTF/MOK
+                    setBuzzerFreqFromDivider(15000); //TTF - switch off with characteristic frequency
+                                                     //Also causes rhythm effect with buzzer
+                } else if (AUDIOTYPE == 2) { //BB
+                    buzzerFreq = 0; //BB - switch off
+                }
             }
             
             aad->delay_counter[i]--;
