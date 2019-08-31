@@ -16,10 +16,13 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <SDL/SDL.h>
-#include "fmopl.h"
+//#include "fmopl.h"
 //#include "ymf262.h"
 #include "sqz.h"
 #include <math.h>
+#include <SDL/SDL_mixer.h>
+#include <SDL/SDL_audio.h>
+#include "opl.h"
 
 
 #define ADLIB_DATA_COUNT 10
@@ -30,6 +33,7 @@ const int FREQ_RATE = 44100;
 #define BUF_SIZE 2048
 //const int AMPLITUDE = 28000;
 const int AMPLITUDE = 28000;
+#define ADLIB_PORT 0x388
 
 
 char playing;
@@ -41,7 +45,7 @@ unsigned int gamme[] = {343,363,385,408,432,458,485,514,544,577,611,647,0};
 unsigned int bgamme[] = {36485,34437,32505,30680,28959,27333,25799,24351,22984,21694,20477,19327,10};
 unsigned char btempo[] = {4,6,6,10,8,3,0,0,6,0,10,2,3,3,0,0};
 
-FM_OPL *opl;
+//FM_OPL *opl;
 
 FILE* gifp;
 
@@ -128,7 +132,8 @@ int fillchip(ADLIB_DATA *aad);
 void insmaker(unsigned char *insdata, int channel);
 int load_file(char *filename, unsigned char **raw_data);
 void all_vox_zero();
-void callback(void *userdata, Uint8 *audiobuf, int len);
+//void callback(void *userdata, Uint8 *audiobuf, int len);
+void TimerCallback(void *data);
 //int main(int argc, char *argv[]);
 
 unsigned int loaduint16(unsigned char c1, unsigned char c2){
@@ -143,28 +148,44 @@ int loadint16(unsigned char c1, unsigned char c2){
 
 int play(){
     int i;
+        //OPL_SetCallback(0, TimerCallback, &sdl_player_data);
+
     printf("Playing... (terminate with Ctrl-C)\n");
     while(1){ //Play until ctrl-c
-        SDL_PauseAudio(0);
-        SDL_Delay(1000 * sdl_player_data.spec.freq / (sdl_player_data.spec.size / sdl_player_data.sampsize));
+        //SDL_PauseAudio(0);
+        //SDL_Delay(1000 * sdl_player_data.spec.freq / (sdl_player_data.spec.size / sdl_player_data.sampsize));
     }
 }
 
 int init(){
+        AUDIOTIMING = 0;
+    lastaudiotick = SDL_GetTicks();
+	audiodelay = 14;
+
    memset(&(sdl_player_data.spec), 0x00, sizeof(SDL_AudioSpec));
-    if(SDL_Init(SDL_INIT_AUDIO) < 0) {
-        fprintf(stderr, "unable to initialize SDL -- %s\n", SDL_GetError());
-        return EXIT_FAILURE;
+   
+       OPL_SetSampleRate(FREQ_RATE);
+
+    if (!OPL_Init(ADLIB_PORT))
+    {
+        fprintf(stderr, "Unable to initialise OPL layer\n");
+        exit(-1);
     }
 
+   
+  //  if(SDL_Init(SDL_INIT_AUDIO) < 0) {
+  //      fprintf(stderr, "unable to initialize SDL -- %s\n", SDL_GetError());
+  //      return EXIT_FAILURE;
+   // }
+/*
     sdl_player_data.spec.freq = FREQ_RATE;
     sdl_player_data.spec.format = AUDIO_S16SYS;
     sdl_player_data.spec.channels = 1; //Mono
     sdl_player_data.spec.samples = BUF_SIZE;
     sdl_player_data.spec.callback = callback;
     sdl_player_data.spec.userdata = &sdl_player_data;
-
-    if(SDL_OpenAudio(&(sdl_player_data.spec), NULL) < 0) {
+*/
+    /*if(SDL_OpenAudio(&(sdl_player_data.spec), NULL) < 0) {
         fprintf(stderr, "unable to open audio -- %s\n", SDL_GetError());
         return EXIT_FAILURE;
     }
@@ -174,20 +195,36 @@ int init(){
 
     OPLResetChip(opl);
     //YMF262ResetChip(0);
+    */
+    
+
+    
     
     buzzerFreq = 0;
 
     sdl_player_data.sampsize = sdl_player_data.spec.channels * (sdl_player_data.spec.format == AUDIO_U8 ? 1 : 2);
 
+    OPL_SetCallback(0, TimerCallback, &sdl_player_data);
+
 }
 
 int clean(){
-    OPLDestroy(opl);
+/*    OPLDestroy(opl);
     //YMF262Shutdown();
 
     if(!SDL_WasInit(SDL_INIT_AUDIO)) return;
 
+    SDL_CloseAudio();*/
+    
+    
+        free (sdl_player_data.aad.data);
+
+    OPL_Shutdown();
+
+    if(!SDL_WasInit(SDL_INIT_AUDIO)) return;
+
     SDL_CloseAudio();
+
     SDL_Quit();
 
 }
@@ -215,8 +252,10 @@ void updatechip(int reg, int val)
     } else {
         //YMF262Write(0, 0, reg);
         //YMF262Write(0, 1, val);
-        OPLWrite(opl, 0, (unsigned char)reg);
-        OPLWrite(opl, 1, (unsigned char)val);
+        //OPLWrite(opl, 0, (unsigned char)reg);
+        //OPLWrite(opl, 1, (unsigned char)val);
+        OPL_WriteRegister(reg, val);
+
     }
 }
 
@@ -876,6 +915,31 @@ double squaresine(double val)
     else return -1;
 }
 
+void TimerCallback(void *data)
+{
+
+
+    SDL_PLAYER	*sdlp = (SDL_PLAYER *)data;
+	//Delay is original 13.75 ms
+    int delay = 14;
+	AUDIOTIMING++;
+	if (AUDIOTIMING > 3) {
+		AUDIOTIMING = 0;
+		delay--;
+	}
+
+    // Read data until we must make a delay.
+
+    sdlp->playing = fillchip(&(sdlp->aad));
+
+
+    // Schedule the next timer callback.
+
+    OPL_SetCallback(delay, TimerCallback, sdlp);
+
+}
+
+/*
 void callback(void *userdata, Uint8 *audiobuf, int len)
 {
   SDL_PLAYER	*sdlp = (SDL_PLAYER *)userdata;
@@ -915,7 +979,8 @@ void callback(void *userdata, Uint8 *audiobuf, int len)
         }
         
     } else {
-        YM3812UpdateOne(opl, (short *)pos, i);
+        //YM3812UpdateOne(opl, (short *)pos, i);
+        OPL_SetCallback(delay, TimerCallback, sdlp);
     }
     
     
@@ -926,7 +991,7 @@ void callback(void *userdata, Uint8 *audiobuf, int len)
      minicnt -= (long)(refresh * i);
   }
 }
-
+*/
 int main(int argc, char *argv[]){
     int i;
 
