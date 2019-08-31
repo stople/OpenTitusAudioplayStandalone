@@ -1,4 +1,6 @@
 CC=gcc
+INCLUDE = -I./include -I./opl -Ic/MinGW/include
+CFLAGS  = -g $(INCLUDE)
 
 AUDIOPLAY_TARG := audioplay.exe
 AUDIOPLAY_OBJS := \

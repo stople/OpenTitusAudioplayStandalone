@@ -84,6 +84,7 @@ typedef struct {
     unsigned char lie[ADLIB_DATA_COUNT];
     unsigned char vox[ADLIB_DATA_COUNT]; //(range: 0-10)
     ADLIB_INSTR *instrument[ADLIB_DATA_COUNT];
+    unsigned char instrument_idx[ADLIB_DATA_COUNT];
 
     unsigned char delay_counter[ADLIB_DATA_COUNT];
     unsigned char freq[ADLIB_DATA_COUNT];
@@ -143,7 +144,7 @@ int loadint16(unsigned char c1, unsigned char c2){
 int play(){
     int i;
     printf("Playing... (terminate with Ctrl-C)\n");
-    for (i = 0; i < 1; i++){
+    while(1){ //Play until ctrl-c
         SDL_PauseAudio(0);
         SDL_Delay(1000 * sdl_player_data.spec.freq / (sdl_player_data.spec.size / sdl_player_data.sampsize));
     }
@@ -225,6 +226,53 @@ void setBuzzerFreqFromDivider(unsigned int divider)
     buzzerFreq = (unsigned int)temp;
 }
 
+void debugPrint(const char* format, ...)
+{
+    return;
+    va_list args;
+    va_start (args, format);
+    vprintf (format, args);
+    va_end (args);
+}
+
+void notePrint(const char* format, ...)
+{
+    //return;
+    va_list args;
+    va_start (args, format);
+    vprintf (format, args);
+    va_end (args);
+}
+
+void dumpBlankNote(int i)
+{
+    //if (i != 0) return;
+    notePrint("|...........");
+}
+
+void dumpNote(ADLIB_DATA *aad, int i)
+{
+    //if (i != 0) return;
+    char notes0[] = {'C','C','D','D','E','F','F','G','G','A','A','B'};
+    char notes1[] = {'-','#','-','#','-','-','#','-','#','-','#','-'};
+    
+    int freq = aad->freq[i];
+    int octave = aad->octave[i];
+    octave += 3;
+    if (freq > 11)
+    {
+        dumpBlankNote(i);
+        return;
+    }
+    
+    int instrument = aad->instrument_idx[i];
+    //instrument = 13;
+
+    notePrint("|%c%c%i%02iv64...", notes0[freq], notes1[freq], octave, instrument);
+    
+}
+
+
 int fillchip(ADLIB_DATA *aad)
 {
     int i;
@@ -239,15 +287,23 @@ int fillchip(ADLIB_DATA *aad)
         aad->skip_delay_counter = aad->skip_delay;
         return (aad->cutsong); //Skip (for modifying tempo)
     }
-    
+    printf("\n");
+
     for (i = 0; i < ADLIB_DATA_COUNT; i++) {
         if (output_format == BUZZER && i != 0) break;
-        if (aad->pointer[i] == NULL) continue;
+        //if (i != 0) break;
         
-        if (aad->delay_counter[i] > 1) {
+        if (aad->pointer[i] == NULL) continue; //pointer: music data
+        
+        if (aad->delay_counter[i] > 1) { //Wait for next instruction
+            debugPrint("WAIT cnt:%i ", aad->delay_counter[i]);
+            dumpBlankNote(i);
+            if (aad->lie[i]) debugPrint("LIE lie:%i ", aad->lie[i]);
             if (aad->delay_counter[i] == 2 && output_format == BUZZER && aad->lie[i] != 1)
             {
-                setBuzzerFreqFromDivider(15000);
+                //Make a "switch off"-sound
+                //setBuzzerFreqFromDivider(15000); //TTF
+                buzzerFreq = 0; //BB
             }
             
             aad->delay_counter[i]--;
@@ -262,14 +318,16 @@ int fillchip(ADLIB_DATA *aad)
         if (byte & 0x80) { //Escape)
             switch (oct) {
             case 0: //Change duration
+                debugPrint("DURATION %i ", freq);
                 aad->duration[i] = freq;
                 break;
 
             case 1: //Change volume
+                debugPrint("VOLUME %i ", freq);
                 aad->volume[i] = freq;
                 if (output_format == BUZZER)
                 {
-                    printf("\nVolume on buzzer...\n");
+                    debugPrint("\nVolume on buzzer...\n");
                     break;
                 }
                 
@@ -286,36 +344,44 @@ int fillchip(ADLIB_DATA *aad)
                 break;
 
             case 2: //Change tempo
+                debugPrint("TEMPO %i ", freq);
                 aad->tempo[i] = freq;
                 break;
 
             case 3: //Change triple_duration
+                debugPrint("TRIPLE %i ", freq);
                 aad->triple_duration[i] = freq;
                 break;
 
-            case 4: //Change lie
+            case 4: //Change lie (0: turn off note when changing tone. 1: Switch tone without turning off)
+                debugPrint("LIE %i ", freq);
                 aad->lie[i] = freq;
                 break;
 
-            case 5: //Change vox (channel)
+            case 5: //Change vox (OPL operator index 0x00-0x15)
+                debugPrint("VOX/CHANNEL %i ", freq);
                 aad->vox[i] = freq;
                 break;
 
             case 6: //Change instrument
+                debugPrint("INSTRUMENT %i ", freq);
                 if (output_format == BUZZER)
                 {
-                    printf("\nIns on buzzer...\n");
+                    debugPrint("\nIns on buzzer...\n");
                     break;
                 }
                 if (freq == 1) { //Not melodic
                     aad->instrument[i] = &(aad->instrument_data[aad->octave[i] + 15]); //(1st perc instrument is the 16th instrument)
+                    aad->instrument_idx[i] = aad->octave[i] + 15; //(1st perc instrument is the 16th instrument)
                     aad->vox[i] = aad->instrument[i]->vox;
-                    aad->perc_stat = aad->perc_stat | (0x10 >> ((signed int)aad->vox[i] - 6)); //set a bit in perc_stat
+                    aad->perc_stat = aad->perc_stat | (0x10 >> ((signed int)aad->vox[i] - 6)); //set a bit in perc_stat (trig perc sound 0-4)
                 } else {
                     if (freq > 1)
                         freq--;
                     aad->instrument[i] = &(aad->instrument_data[freq]);
+                    aad->instrument_idx[i] = freq;
                     if (((signed int)aad->vox[i] - 6) >= 0) {
+                        //tmp1 = (0x10 << ((signed int)aad->vox[i] - 6)) & 0xFF; //
                         tmp1 = (0x10 << ((signed int)aad->vox[i] - 6)) & 0xFF; //
                         aad->perc_stat = aad->perc_stat | tmp1;                //   clear a bit from perc_stat
                         tmp1 = ~(tmp1) & 0xFF;                                 //
@@ -340,11 +406,13 @@ int fillchip(ADLIB_DATA *aad)
                     aad->return_point[i] = aad->pointer[i] + 2;
                     tmp1 = ((unsigned int)aad->pointer[i][1] << 8) & 0xFF00;
                     tmp1 += (unsigned int)aad->pointer[i][0] & 0xFF;
+                    debugPrint("CALLSUB %i ", tmp1);
                     aad->pointer[i] = aad->data + tmp1 + pointer_diff;
                     break;
 
                 case 1: //Update loop counter
                     aad->loop_counter[i] = *(aad->pointer[i]);
+                    debugPrint("LOOPCTR %i ", aad->loop_counter[i]);
                     aad->pointer[i]++;
                     break;
 
@@ -353,23 +421,28 @@ int fillchip(ADLIB_DATA *aad)
                         aad->loop_counter[i]--;
                         tmp1 = ((unsigned int)aad->pointer[i][1] << 8) & 0xFF00;
                         tmp1 += (unsigned int)aad->pointer[i][0] & 0xFF;
+                        debugPrint("LOOP dest:%i ctr:%i", tmp1, aad->loop_counter[i]);
                         aad->pointer[i] = aad->data + tmp1 + pointer_diff;
                     } else {
+                        debugPrint("LOOP end");
                         aad->pointer[i] += 2;
                     }
                     break;
 
                 case 3: //Return from sub
+                    debugPrint("RETURNSUB ");
                     aad->pointer[i] = aad->return_point[i];
                     break;
 
                 case 4: //Jump
                     tmp1 = ((unsigned int)aad->pointer[i][1] << 8) & 0xFF00;
                     tmp1 += (unsigned int)aad->pointer[i][0] & 0xFF;
+                    debugPrint("JUMP %i ", tmp1);
                     aad->pointer[i] = aad->data + tmp1 + pointer_diff;
                     break;
 
                 case 15: //Finish
+                    debugPrint("FINISH ");
                     aad->pointer[i] = NULL;
                     aad->cutsong--;
                     break;
@@ -385,6 +458,10 @@ int fillchip(ADLIB_DATA *aad)
         aad->octave[i] = oct;
         aad->freq[i] = freq;
 
+        debugPrint("NOTE oct:%i freq:%i ", oct, freq);
+
+        dumpNote(aad, i);
+        
         //Play note
         if (output_format == BUZZER)
         {
@@ -395,6 +472,12 @@ int fillchip(ADLIB_DATA *aad)
         else if (gamme[aad->freq[i]] != 0) {
             if (aad->instrument[i]->vox == 0xFE) { //Play a frequence
                 updatechip(0xA0 + aad->vox[i], (unsigned char)(gamme[aad->freq[i]] & 0xFF)); //Output lower 8 bits of frequence
+                
+                //B0:
+                //00000011 - freqH
+                //00011100 - octave
+                //00100000 - key on
+
                 if (aad->lie_late[i] != 1) {
                     updatechip(0xB0 + aad->vox[i], 0); //Silence the channel
                 }
@@ -408,6 +491,7 @@ int fillchip(ADLIB_DATA *aad)
 
                     //Similar to escape, oct = 6 (change instrument)
                     aad->instrument[i] = &(aad->instrument_data[aad->octave[i] + 15]); //(1st perc instrument is the 16th instrument)
+                    aad->instrument_idx[i] = aad->octave[i] + 15; //(1st perc instrument is the 16th instrument)
                     aad->vox[i] = aad->instrument[i]->vox;
                     aad->perc_stat = aad->perc_stat | (0x10 >> ((signed int)aad->vox[i] - 6)); //set a bit in perc_stat
                     tmp2 = voxp[aad->vox[i]];
@@ -434,7 +518,7 @@ int fillchip(ADLIB_DATA *aad)
                 tmpC = 0x10 >> ((signed int)aad->vox[i] - 6);
                 updatechip(0xBD, aad->perc_stat & ~tmpC); //Output perc_stat with one bit removed
                 if (aad->vox[i] == 6) {
-                    updatechip(0xA6, 0x57); //
+                    updatechip(0xA6, 0x57); // Perc frequency
                     updatechip(0xB6, 0);    // Output the perc sound
                     updatechip(0xB6, 5);    //
                 }
@@ -452,7 +536,7 @@ int fillchip(ADLIB_DATA *aad)
     return (aad->cutsong);
 }
 
-/*void gen_dro(ADLIB_DATA *aad, int mus_offset, int ins_offset, int song_number, int size){
+void gen_dro(ADLIB_DATA *aad, int mus_offset, int ins_offset, int song_number, int size){
     unsigned int i, j;
     unsigned char file[20];
     printf("Loading track %d...\n", song_number);
@@ -472,7 +556,7 @@ int fillchip(ADLIB_DATA *aad)
     fclose(gifp);
     printf("done\n");
 }
-*/
+
 
 void insmaker(unsigned char *insdata, int channel)
 {
@@ -589,7 +673,7 @@ int load_data(ADLIB_DATA *aad, unsigned char *raw_data, int song_number)
     unsigned int tmp1; //Source offset
     unsigned int tmp2; //Next offset
 
-    aad->perc_stat = 0x20;
+    aad->perc_stat = 0x20; //Rythm mode
 
     //Load instruments
     j = INS_OFFSET;
@@ -686,6 +770,7 @@ int load_data(ADLIB_DATA *aad, unsigned char *raw_data, int song_number)
         aad->lie[i] = 0;
         aad->vox[i] = (unsigned char)i;
         aad->instrument[i] = NULL;
+        aad->instrument_idx[i] = 0;
         //aad->instrument[i] = &(aad->instrument_data[0]);
         aad->delay_counter[i] = 0;
         aad->freq[i] = 0;
@@ -738,6 +823,7 @@ int load_data_buzzer(ADLIB_DATA *aad, unsigned char *raw_data, int song_number)
         aad->lie[i] = 0;
         aad->vox[i] = (unsigned char)i;
         aad->instrument[i] = NULL;
+        aad->instrument_idx[i] = 0;
         //aad->instrument[i] = &(aad->instrument_data[0]);
         aad->delay_counter[i] = 0;
         aad->freq[i] = 0;
@@ -860,8 +946,8 @@ int main(int argc, char *argv[]){
     printf("To listen to a DRO v0.1 file, just google opl2wav.\n\n");
 
     song = 0;
-    output_format = DIRECT;
-    //output_format = BUZZER;
+    //output_format = DIRECT;
+    output_format = BUZZER;
     size = 4000;
 
     for (i = 0; i < argc; i++) {
@@ -912,7 +998,7 @@ int main(int argc, char *argv[]){
     //initializeOpenTitusAudioFile(sdl_player_data.aad.data);
     
     if (output_format == DRO) {
-        //gen_dro(&(sdl_player_data.aad), MUS_OFFSET, INS_OFFSET, song, size);
+        gen_dro(&(sdl_player_data.aad), MUS_OFFSET, INS_OFFSET, song, size);
     } else if (output_format == DIRECT){
         printf("Loading track %d...\n", song);
         load_data(&(sdl_player_data.aad), sdl_player_data.aad.data, song);
