@@ -132,7 +132,7 @@ int fillchip(ADLIB_DATA *aad);
 void insmaker(unsigned char *insdata, int channel);
 int load_file(char *filename, unsigned char **raw_data);
 void all_vox_zero();
-//void callback(void *userdata, Uint8 *audiobuf, int len);
+void callback(void *userdata, Uint8 *audiobuf, int len);
 void TimerCallback(void *data);
 //int main(int argc, char *argv[]);
 
@@ -152,9 +152,13 @@ int play(){
 
     printf("Playing... (terminate with Ctrl-C)\n");
     while(1){ //Play until ctrl-c
-        //SDL_PauseAudio(0);
-        //SDL_Delay(1000 * sdl_player_data.spec.freq / (sdl_player_data.spec.size / sdl_player_data.sampsize));
-    }
+        if (output_format == BUZZER)
+        {
+            
+            SDL_PauseAudio(0);
+            SDL_Delay(1000 * sdl_player_data.spec.freq / (sdl_player_data.spec.size / sdl_player_data.sampsize));
+        }
+ }
 }
 
 int init(){
@@ -164,6 +168,28 @@ int init(){
 
    memset(&(sdl_player_data.spec), 0x00, sizeof(SDL_AudioSpec));
    
+
+   if (output_format == BUZZER)
+   {
+    if(SDL_Init(SDL_INIT_AUDIO) < 0) {
+        fprintf(stderr, "unable to initialize SDL -- %s\n", SDL_GetError());
+        return EXIT_FAILURE;
+    }
+
+    sdl_player_data.spec.freq = FREQ_RATE;
+    sdl_player_data.spec.format = AUDIO_S16SYS;
+    sdl_player_data.spec.channels = 1; //Mono
+    sdl_player_data.spec.samples = BUF_SIZE;
+    sdl_player_data.spec.callback = callback;
+    sdl_player_data.spec.userdata = &sdl_player_data;
+
+    if(SDL_OpenAudio(&(sdl_player_data.spec), NULL) < 0) {
+        fprintf(stderr, "unable to open audio -- %s\n", SDL_GetError());
+        return EXIT_FAILURE;
+    }
+   }
+   else
+   {
        OPL_SetSampleRate(FREQ_RATE);
 
     if (!OPL_Init(ADLIB_PORT))
@@ -171,25 +197,10 @@ int init(){
         fprintf(stderr, "Unable to initialise OPL layer\n");
         exit(-1);
     }
-
+           OPL_SetCallback(0, TimerCallback, &sdl_player_data);
+   }
    
-  //  if(SDL_Init(SDL_INIT_AUDIO) < 0) {
-  //      fprintf(stderr, "unable to initialize SDL -- %s\n", SDL_GetError());
-  //      return EXIT_FAILURE;
-   // }
 /*
-    sdl_player_data.spec.freq = FREQ_RATE;
-    sdl_player_data.spec.format = AUDIO_S16SYS;
-    sdl_player_data.spec.channels = 1; //Mono
-    sdl_player_data.spec.samples = BUF_SIZE;
-    sdl_player_data.spec.callback = callback;
-    sdl_player_data.spec.userdata = &sdl_player_data;
-*/
-    /*if(SDL_OpenAudio(&(sdl_player_data.spec), NULL) < 0) {
-        fprintf(stderr, "unable to open audio -- %s\n", SDL_GetError());
-        return EXIT_FAILURE;
-    }
-
     opl = OPLCreate(OPL_TYPE_YM3812, 3579545, FREQ_RATE);
     //YMF262Init(1, 14400000, FREQ_RATE);
 
@@ -204,7 +215,6 @@ int init(){
 
     sdl_player_data.sampsize = sdl_player_data.spec.channels * (sdl_player_data.spec.format == AUDIO_U8 ? 1 : 2);
 
-    OPL_SetCallback(0, TimerCallback, &sdl_player_data);
 
 }
 
@@ -939,7 +949,7 @@ void TimerCallback(void *data)
 
 }
 
-/*
+
 void callback(void *userdata, Uint8 *audiobuf, int len)
 {
   SDL_PLAYER	*sdlp = (SDL_PLAYER *)userdata;
@@ -980,7 +990,7 @@ void callback(void *userdata, Uint8 *audiobuf, int len)
         
     } else {
         //YM3812UpdateOne(opl, (short *)pos, i);
-        OPL_SetCallback(delay, TimerCallback, sdlp);
+        //OPL_SetCallback(delay, TimerCallback, sdlp);
     }
     
     
@@ -991,7 +1001,7 @@ void callback(void *userdata, Uint8 *audiobuf, int len)
      minicnt -= (long)(refresh * i);
   }
 }
-*/
+
 int main(int argc, char *argv[]){
     int i;
 
